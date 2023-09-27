@@ -55,7 +55,8 @@ const chooseAction = async () => {
     await userVote(rl);
   } else if (action === '2') {
     //view results
-    console.log('you chose to view results');
+    viewResults();
+    // console.log('you chose to view results');
   } else {
     console.log('You wrote incorrect option, try again');
     await chooseAction(rl);
@@ -68,11 +69,11 @@ const viewResults = () => {
     console.log('There\'re no available vote results yet')
     return;
   }
-
   let resultsStr = 'Results:\n';
   for(let res of results){
-    resultsStr+= `Candidate ${res.name} : `
+    resultsStr+= `Candidate ${res.name} : ${res.votes} votes\n`
   }
+  console.log(resultsStr)
 }
 
 const userVote = async () => {
@@ -124,7 +125,6 @@ const makeVote = async (id, voterIndex) => {
     return;
   }
 
-  //generate message
   const voterdata = {
     ...voters[voterIndex],
     vote_for: parseInt(voteForId),
@@ -132,18 +132,12 @@ const makeVote = async (id, voterIndex) => {
 
   const message = JSON.stringify(voterdata);
 
-  // console.log('message ', message);
-
   //hash message
   const hashedMessage = await xorEncrypt(message, keys.cec_key.public_key);
-
-  // console.log('hashed message ', hashedMessage);
 
   // sign message with electronic signature
   let key = new NodeRSA(keys.voter_keys[id].private_key, 'private');
   const signature = key.sign(hashedMessage, 'hex');
-
-  // console.log('signature ', signature, '\n\n');
 
   const voteSent = await sendVote({ hashedMessage, signature });
 
@@ -184,7 +178,7 @@ const main = async () => {
 
   await chooseAction(rl);
 
-  // rl.close()
+  rl.close()
 };
 
 (async () => {

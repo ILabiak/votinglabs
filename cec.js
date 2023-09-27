@@ -1,4 +1,5 @@
 const NodeRSA = require('node-rsa');
+const fs = require('fs');
 const { xorEncrypt } = require('./utils');
 
 const candidates = require('./data/candidates.json');
@@ -71,4 +72,7 @@ const calculateVotes = async () => {
 
   //show results
   console.log(JSON.stringify(results, null, 2));
+  
+  //save results
+  fs.writeFileSync('./data/results.json', JSON.stringify(results, null, 2))
 })();

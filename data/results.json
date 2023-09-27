@@ -1,0 +1,17 @@
+[
+  {
+    "id": 1,
+    "name": "John Doe",
+    "votes": 2
+  },
+  {
+    "id": 2,
+    "name": "Fredy Ken",
+    "votes": 0
+  },
+  {
+    "id": 3,
+    "name": "David Suares",
+    "votes": 0
+  }
+]

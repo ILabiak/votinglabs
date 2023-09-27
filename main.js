@@ -62,6 +62,19 @@ const chooseAction = async () => {
   }
 };
 
+const viewResults = () => {
+  let results = require('./data/results.json')
+  if(!results[0]){
+    console.log('There\'re no available vote results yet')
+    return;
+  }
+
+  let resultsStr = 'Results:\n';
+  for(let res of results){
+    resultsStr+= `Candidate ${res.name} : `
+  }
+}
+
 const userVote = async () => {
   let id = await new Promise((resolve) => {
     rl.question('Write your voter id\n', resolve);
@@ -86,6 +99,10 @@ const userVote = async () => {
   }
   console.log("You've succesfully authorised ");
 
+  await makeVote(id, voterIndex);
+};
+
+const makeVote = async (id, voterIndex) => {
   let candidatesInfo = '';
   candidates.forEach((el) => {
     candidatesInfo += `№ ${el.id}. ${el.name}\n`;
@@ -137,7 +154,7 @@ const userVote = async () => {
     return;
   }
   console.log('Error while sending vote');
-};
+}
 
 const sendVote = async (obj) => {
   if (obj?.hashedMessage && obj?.signature) {

@@ -1,7 +1,6 @@
 const NodeRSA = require('node-rsa');
 const fs = require('fs').promises;
 const readline = require('readline');
-
 const candidates = require('./data/candidates.json');
 const voters = require('./data/voters.json');
 let votesData = require('./data/votesdata.json');

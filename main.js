@@ -3,12 +3,11 @@ const fs = require('fs');
 const readline = require('readline');
 const candidates = require('./data/candidates.json');
 const voters = require('./data/voters.json');
+const signedBallots = require('./data/signed_ballots.json');
 let votesData = require('./data/votesdata.json');
 let ballots = require('./data/ballots.json');
-let ballotKeys = require('./data/ballot_keys.json')
+let ballotKeys = require('./data/ballot_keys.json');
 let keys, rl;
-
-const { xorEncrypt } = require('./utils');
 
 // Generate candidates and voters
 const generateRSAKeys = () => {
@@ -113,6 +112,11 @@ const userAuth = async (action) => {
 };
 
 const makeVote = async (id, voterIndex) => {
+  if (!signedBallots[id]) {
+    console.log('You have not received signed ballots yet');
+    return;
+  }
+  console.log('You have signed ballots');
   let candidatesInfo = '';
   candidates.forEach((el) => {
     candidatesInfo += `№ ${el.id}. ${el.name}\n`;
@@ -133,37 +137,45 @@ const makeVote = async (id, voterIndex) => {
     console.log("There's no candidate with that id");
     return;
   }
+  const ballotKey = ballotKeys[id][signedBallots[id].ballot_id]
+  const key = new NodeRSA(ballotKey, 'private');
+  key.setOptions({ encryptionScheme: 'pkcs1' });
 
-  const voterdata = {
-    ...voters[voterIndex],
-    vote_for: parseInt(voteForId),
-  };
+  for (let msgObj of signedBallots[id].messages) {
+    const decripted = key.decrypt(msgObj.msg, 'utf8');
+    let decriptedObj = JSON.parse(decripted);
+    if (decriptedObj.vote_for === parseInt(voteForId)) {
+      const cec_key = new NodeRSA(keys.cec_key.public_key, 'public');
+      cec_key.setOptions({ encryptionScheme: 'pkcs1' });
+      hashedMessage = cec_key.encrypt(msgObj.msg, 'base64', 'utf-8');
+      const votedata = {
+        hashedMessage,
+        sign: msgObj.sign,
+        key: ballotKey
+      };
 
-  const message = JSON.stringify(voterdata);
+      const voteSent = await sendVote({ ...votedata });
 
-  //hash message
-  const hashedMessage = await xorEncrypt(message, keys.cec_key.public_key);
+      if (voteSent) {
+        console.log(
+          `Your vote for ${candidates[candidateIndex].name} has been sent to CEC`
+        );
+        return;
+      }
 
-  // sign message with electronic signature
-  let key = new NodeRSA(keys.voter_keys[id].private_key, 'private');
-  const signature = key.sign(hashedMessage, 'hex');
-
-  const voteSent = await sendVote({ hashedMessage, signature });
-
-  if (voteSent) {
-    console.log(
-      `Your vote for ${candidates[candidateIndex].name} has been sent to CEC`
-    );
-    return;
+      console.log('Error while sending vote');
+    }
   }
-  console.log('Error while sending vote');
+
+  console.log('Some error occured')
+
 };
 
 const sendVote = async (obj) => {
-  if (obj?.hashedMessage && obj?.signature) {
+  if (obj?.hashedMessage && obj?.sign && obj?.key) {
     votesData.push(obj);
     try {
-      await fs.writeFile(
+      await fs.writeFileSync(
         './data/votesdata.json',
         JSON.stringify(votesData, null, 2)
       );
@@ -183,17 +195,17 @@ const generateBallots = async (id, voterIndex) => {
     // public_key: key.exportKey('public'),
     ballots: [],
   };
-  ballotKeys[id] = {}
+  ballotKeys[id] = {};
   for (let i = 1; i <= 10; i++) {
     const key = new NodeRSA({ b: 512 });
-    key.setOptions({encryptionScheme: 'pkcs1'});
-    let ballot = {ballot_id: i, messages :[]};
+    key.setOptions({ encryptionScheme: 'pkcs1' });
+    let ballot = { ballot_id: i, messages: [] };
     for (let candidate of candidates) {
       const voterdata = {
         ...voters[voterIndex],
         vote_for: candidate.id,
       };
-      ballotKeys[id][i] = key.exportKey('private')
+      ballotKeys[id][i] = key.exportKey('private');
 
       const message = JSON.stringify(voterdata);
       const encrypted = key.encrypt(message, 'base64', 'utf-8');
@@ -204,8 +216,11 @@ const generateBallots = async (id, voterIndex) => {
   // console.log('Ballot\n', JSON.stringify(ballotsObj, null, 2));
   ballots.push(ballotsObj);
   fs.writeFileSync('./data/ballots.json', JSON.stringify(ballots, null, 2));
-  fs.writeFileSync('./data/ballot_keys.json', JSON.stringify(ballotKeys, null, 2));
-  console.log('Your ballots were successfully created and sent to CEC')
+  fs.writeFileSync(
+    './data/ballot_keys.json',
+    JSON.stringify(ballotKeys, null, 2)
+  );
+  console.log('Your ballots were successfully created and sent to CEC');
 };
 
 const main = async () => {

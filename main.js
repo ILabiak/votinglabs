@@ -69,13 +69,17 @@ const chooseAction = async () => {
 
 const viewResults = () => {
   let results = require('./data/results.json');
-  if (!results[0]) {
+  if (!results.candidates || !results.votes) {
     console.log("There're no available vote results yet");
     return;
   }
   let resultsStr = 'Results:\n';
-  for (let res of results) {
-    resultsStr += `Candidate ${res.name} : ${res.votes} votes\n`;
+  for (let candidate of results.candidates) {
+    resultsStr += `Candidate ${candidate.name} : ${candidate.votes} votes\n`;
+  }
+  resultsStr += '\n\n'
+  for(let vote of results.votes){
+    resultsStr+= `Voter ${vote.voter_id} voted for ${vote.vote_for}\n`
   }
   console.log(resultsStr);
 };
@@ -96,10 +100,6 @@ const userAuth = async (action) => {
   }
   if (keys.voter_keys[id].private_key != privateKey.replace(/\\n/g, '\n')) {
     console.log('You provided wrong private key');
-    // console.dir({
-    //   voter_pk: keys.voter_keys[id].private_key,
-    //   provided_pk: privateKey.replace(/\\n/g, '\n'),
-    // });
     return;
   }
   console.log("You've succesfully authorised ");
@@ -188,11 +188,8 @@ const sendVote = async (obj) => {
 };
 
 const generateBallots = async (id, voterIndex) => {
-  // let key = new NodeRSA(keys.voter_keys[id].private_key, 'private');
-  // key.setOptions({encryptionScheme: 'pkcs1'})
   let ballotsObj = {
     voter_id: id,
-    // public_key: key.exportKey('public'),
     ballots: [],
   };
   ballotKeys[id] = {};
@@ -213,7 +210,6 @@ const generateBallots = async (id, voterIndex) => {
     }
     ballotsObj.ballots.push(ballot);
   }
-  // console.log('Ballot\n', JSON.stringify(ballotsObj, null, 2));
   ballots.push(ballotsObj);
   fs.writeFileSync('./data/ballots.json', JSON.stringify(ballots, null, 2));
   fs.writeFileSync(

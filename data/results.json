@@ -3,7 +3,7 @@
     {
       "id": 1,
       "name": "John Doe",
-      "votes": 0
+      "votes": 1
     },
     {
       "id": 2,
@@ -13,17 +13,17 @@
     {
       "id": 3,
       "name": "David Suares",
-      "votes": 1
+      "votes": 0
     }
   ],
   "votes": [
     {
-      "voter_id": 21298330,
+      "voter_id": 920322,
       "vote_for": "Fredy Ken"
     },
     {
-      "voter_id": 920322,
-      "vote_for": "David Suares"
+      "voter_id": 21298330,
+      "vote_for": "John Doe"
     }
   ]
 }

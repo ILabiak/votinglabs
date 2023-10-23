@@ -120,10 +120,10 @@ const signBallots = () => {
 
 (async () => {
   //calculate votes
-  await calculateVotes();
-  console.log(JSON.stringify(results, null, 2));
-  fs.writeFileSync('./data/results.json', JSON.stringify(results, null, 2))
+  // await calculateVotes();
+  // console.log(JSON.stringify(results, null, 2));
+  // fs.writeFileSync('./data/results.json', JSON.stringify(results, null, 2))
 
   //sign ballots
-  // await signBallots();
+  await signBallots();
 })();

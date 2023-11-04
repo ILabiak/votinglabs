@@ -50,14 +50,15 @@ const calculateVotes = async () => {
     }
     // console.log(voteData)
 
+    if(votersDone.has(voteData.reg_number)){
+      console.log(`Person with registration number ${voteData.reg_number} has already voted`)
+      continue;
+    }
     const candidateIndex = candidates.findIndex(el => el.id === voteData.vote_for)
-    votersDone.add(voteData.id);
+    votersDone.add(voteData.reg_number);
     results.candidates[candidateIndex].votes += 1;
     results.votes.push({voter_id: voteData.voter_id, vote_for: candidates[candidateIndex].name})
-
-    console.log(results)
-
-    // console.log(vote.hashedMessage)
+    console.log(`Person with registration number ${voteData.reg_number} has successfully voted for ${candidates[candidateIndex].name}`)
   }
 };
 

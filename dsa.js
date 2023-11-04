@@ -9,7 +9,6 @@ const dsaSignature = (msg) => {
   const dsa = crypto.createSign('sha512');
   dsa.update(msg);
   const signature = dsa.sign(privateKey);
-  console.log(signature);
   return {
     signature,
     verifySinature: publicKey

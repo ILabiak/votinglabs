@@ -9,7 +9,7 @@ let registrations = require('./data/registrations.json'); //array of objects
 const sendRegNumbers = async () => {
   if (registerVoters.length < 1) {
     console.log('no new voters requested');
-  }
+  } 
   for (let voter of registerVoters) {
     let voterIndex = voters.findIndex((el) => el.id === parseInt(voter));
     let registrationIndex = registrations.findIndex((el) => el.voter_id === parseInt(voter));

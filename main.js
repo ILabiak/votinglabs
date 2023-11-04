@@ -136,6 +136,8 @@ const requestRegNumber = async () => {
     './data/reg_voters.json',
     JSON.stringify(registerVoters, null, 2)
   );
+
+  console.log('You have requested a registration number')
 };
 
 const makeVote = async () => {
@@ -194,7 +196,6 @@ const makeVote = async () => {
 
   const encripted = enMsg.map(el => el.toString())
 
-  const strP = p.toString()
 
   const voteSent = await sendVote({
     hashedMessage: encripted,

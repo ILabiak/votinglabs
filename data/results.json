@@ -13,13 +13,17 @@
     {
       "id": 3,
       "name": "David Suares",
-      "votes": 0
+      "votes": 1
     }
   ],
   "votes": [
     {
-      "voter_id": 124124124,
+      "voter_id": 723498732879,
       "vote_for": "Fredy Ken"
+    },
+    {
+      "voter_id": 234247897287124,
+      "vote_for": "David Suares"
     }
   ]
 }

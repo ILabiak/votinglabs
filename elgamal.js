@@ -1,107 +1,138 @@
+const bigInt = require('big-integer');
 const crypto = require('crypto');
 
-function gcd(a, b) {
-  if (b === 0n) {
-    return a;
-  } else {
-    return gcd(b, a % b);
+function isPrime(n) {
+  if (n <= 1) return false;
+  if (n <= 3) return true;
+  if (n % 2 === 0 || n % 3 === 0) return false;
+  let i = 5;
+  while (i * i <= n) {
+    if (n % i === 0 || n % (i + 2) === 0) return false;
+    i += 6;
   }
+  return true;
 }
 
-function generateRandomBigInt(bits) {
-  let hex = '0x';
-  for (let i = 0; i < bits / 4; i++) {
-    hex += Math.floor(Math.random() * 16).toString(16);
-  }
-  return BigInt(hex);
-}
-
-function genKey(q) {
-  let key;
+function generateLargePrime() {
+  let p;
   do {
-    key = generateRandomBigInt(q.toString(16).length);
-  } while (gcd(q, key) !== 1n);
-  return key;
+    p = bigInt.randBetween(1000, 10000);
+  } while (!isPrime(p));
+  return p;
 }
 
-function power(a, b, c) {
-  let x = 1n;
-  let y = a;
-  while (b > 0n) {
-    if (b % 2n !== 0n) {
-      x = (x * y) % c;
-    }
-    y = (y * y) % c;
-    b = b / 2n;
-  }
-  return x % c;
+function generateG(p) {
+  let g;
+  do {
+    g = bigInt.randBetween(2, p.minus(1));
+  } while (
+    bigInt(g).modPow(p.minus(1).divide(2), p).notEquals(1) ||
+    bigInt(g).modPow(p.minus(1), p).notEquals(1)
+  );
+  return g;
 }
 
-function encrypt(msg, q, h, g) {
-  const enMsg = [];
-  const k = genKey(q); // Private key for sender
-  const s = power(h, k, q);
-  const p = power(g, k, q);
-
-  for (let i = 0; i < msg.length; i++) {
-    enMsg.push(msg.charCodeAt(i));
-  }
-
-//   console.log('g^k used:', p);
-//   console.log('g^ak used:', s);
-
-  for (let i = 0; i < enMsg.length; i++) {
-    enMsg[i] = s * BigInt(enMsg[i]);
-  }
-
-  return { enMsg, p };
+function generatePrivateKey(p) {
+  return bigInt.randBetween(2, p.minus(2));
 }
 
-function decrypt(enMsg, p, key, q) {
-  const drMsg = [];
-  const h = power(p, key, q);
-
-  for (let i = 0; i < enMsg.length; i++) {
-    drMsg.push(String.fromCharCode(Number(enMsg[i] / h)));
-  }
-
-  return drMsg.join('');
+function generatePublicKey(p, g, x) {
+  return bigInt(g).modPow(x, p);
 }
 
-// function main() {
-//     const msg = JSON.stringify({
-//         as: 'sdf',
-//         asf: 234
-//     });
-//     console.log('Original Message:', msg);
+function encrypt(p, g, y, plaintext) {
+  let k = generatePrivateKey(p);
+  let c1 = bigInt(g).modPow(k, p);
+  let s = bigInt(y).modPow(k, p);
+  let c2 = plaintext
+    .split('')
+    .map((char) => bigInt(char.charCodeAt(0)).multiply(s).mod(p));
+  return { c1, c2 };
+}
 
-//     const q = generateRandomBigInt(256); // Adjust the number of bits as needed
-//     const g = generateRandomBigInt(q.toString(16).length);
+function decrypt(p, x, c1, c2) {
+  let s = bigInt(c1).modPow(x, p);
+  let decryptedText = c2.map((charBigInt) =>
+    String.fromCharCode(bigInt(charBigInt).multiply(bigInt(s).modInv(p)).mod(p))
+  );
+  return decryptedText.join('');
+}
 
-//     const key = genKey(q); // Private key for receiver
-//     const h = power(g, key, q);
+function generateCoprimeK(p) {
+  let k;
+  do {
+    k = generatePrivateKey(p);
+  } while (
+    k.equals(0) ||
+    k.greaterOrEquals(p.minus(1)) ||
+    !isCoprime(k, p.minus(1))
+  );
+  return k;
+}
 
-//     console.log('g used:', g);
-//     console.log('g^a used:', h);
+function isCoprime(a, b) {
+  while (b.neq(0)) {
+    const temp = a;
+    a = b;
+    b = temp.mod(b);
+  }
+  return a.eq(1);
+}
 
-//     const { enMsg, p } = encrypt(msg, q, h, g);
-//     const drMsg = decrypt(enMsg, p, key, q);
-//     console.log('Decrypted Message:', drMsg);
-// }
+function sign(p, g, x, message) {
+  const hash = crypto.createHash('sha256').update(message).digest('hex');
+  const m = bigInt(hash, 16);
 
-// main();
+  let r, s;
+  let k = generateCoprimeK(p);
+  r = bigInt(g).modPow(k, p);
+  const kInv = k.modInv(p.minus(1));
+  s = m.minus(x.times(r)).times(kInv).mod(p.minus(1));
+  return { r, s };
+}
 
-const generateElGamalKeys = () => {
-  const q = generateRandomBigInt(256);
-  const g = generateRandomBigInt(q.toString(16).length);
+function verify(p, g, y, message, signature) {
+  const { r, s } = signature;
+  if (r.greater(p) || s.greater(p.minus(1))) {
+    return false;
+  }
+  const hash = crypto.createHash('sha256').update(message).digest('hex');
+  const m = bigInt(hash, 16);
 
-  const key = genKey(q); // Private key for receiver
-  const h = power(g, key, q);
-  return { q, g, h, key };
-};
+  const leftSide = bigInt(y).modPow(r, p).times(r.modPow(s, p)).mod(p);
+  const rightSide = bigInt(g).modPow(m, p);
+  return leftSide.equals(rightSide);
+}
+
+function generateKeys() {
+  const p = generateLargePrime();
+  const g = generateG(p);
+  const x = generatePrivateKey(p);
+  const y = generatePublicKey(p, g, x);
+  return { p, g, x, y };
+}
+
+function main() {
+  const { p, g, x, y } = generateKeys();
+  console.log('Відкритий ключ (p, g, y):', { p, g, y });
+  console.log('Закритий ключ x:', x);
+
+  const messageToSign = 'This is a signed message.';
+  const signature = sign(p, g, x, messageToSign);
+  // signature.r = bigInt(23423442);
+  const isSignatureValid = verify(p, g, y, messageToSign, signature);
+
+  console.log('Створений підпис:', signature);
+  console.log(
+    'Перевірка підпису:',
+    isSignatureValid ? 'Підпис дійсний' : 'Підпис недійсний'
+  );
+}
+
+// main()
 
 module.exports = {
-  generateElGamalKeys,
-  encrypt,
-  decrypt,
+  generateKeys,
+  sign,
+  verify,
 };

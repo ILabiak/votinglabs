@@ -2,35 +2,26 @@ const fs = require('fs');
 const crypto = require('crypto');
 const readline = require('readline');
 const NodeRSA = require('node-rsa');
+const elliptic = require('elliptic');
 const candidates = require('./data/candidates.json');
 const voters = require('./data/voters.json');
-const elGamal = require('./elgamal');
-const bigInt = require('big-integer');
-let keys, rl;
-let randomLines = [];
-let ballots = [];
-let signatures = {};
-let results = { candidates: [], votes: [] };
+let keys;
+let ec1Ballots = [];
+let ec2Ballots = [];
 
-function shuffle(array) {
-  let currentIndex = array.length,
-    randomIndex;
-
-  while (currentIndex > 0) {
-    randomIndex = Math.floor(Math.random() * currentIndex);
-    currentIndex--;
-
-    [array[currentIndex], array[randomIndex]] = [
-      array[randomIndex],
-      array[currentIndex],
-    ];
-  }
-  return array;
-}
+const dsa = new elliptic.ec('secp256k1');
 
 // Generate candidates and voters
 const generateRSAKeys = () => {
+  //cec_key
+  const key = new NodeRSA({ b: 512 });
+  const privateKey = key.exportKey('private');
+  const publicKey = key.exportKey('public');
   let keys = {
+    cec_key: {
+      public_key: publicKey,
+      private_key: privateKey,
+    },
     voter_keys: {},
   };
   //voter keys
@@ -44,313 +35,121 @@ const generateRSAKeys = () => {
     };
   }
 
-  fs.writeFileSync('./data/keys.json', JSON.stringify(keys, null, 2));
+  fs.writeFileSync('./data/keys.json', JSON.stringify(keys));
   console.log('Keys are successfully generated');
   return keys;
 };
 
-function generateRandomLine(length) {
-  const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-  let randomLine = '/';
+function findFactors(number) {
+  let factor1 = 1;
+  let factor2 = number;
 
-  for (let i = 0; i < length; i++) {
-    const randomIndex = Math.floor(Math.random() * characters.length);
-    randomLine += characters.charAt(randomIndex);
+  for (let i = Math.floor(Math.sqrt(number)); i > 1; i--) {
+    if (number % i === 0) {
+      factor1 = i;
+      factor2 = number / i;
+      break;
+    }
   }
-
-  return randomLine;
+  if (factor1 == 1 || factor2 == 1) {
+    return;
+  }
+  return [factor1, factor2];
 }
 
-const makeVote = async () => {
-  const voteData = {
-    reg_number: parseInt(regNumber),
-    voter_id: parseInt(randomId),
-    vote_for: parseInt(voteForId),
+const makeVote = async (voter, candidateId) => {
+  let candidateIndex = candidates.findIndex((el) => el.id === candidateId);
+  if (candidateIndex < 0) {
+    console.log('There is no candidate with id:', candidateId);
+    return;
+  }
+  const factors = findFactors(candidateId);
+  if (!factors || factors.length !== 2) {
+    console.log(
+      'Candidate id is wrong. Can not find two factors, id:',
+      candidateId
+    );
+    return;
+  }
+  let voteData1 = {
+    voter_id: voter.id,
+    vote_for_ec1: factors[0],
   };
+  let voteData2 = {
+    voter_id: voter.id,
+    vote_for_ec2: factors[1],
+  };
+  let voteMessage1 = JSON.stringify(voteData1);
+  let voteMessage2 = JSON.stringify(voteData2);
 
-  const voteMessage = JSON.stringify(voteData);
+  let privateKey = keys['voter_keys'][voter.id]?.private_key;
+  // console.log(privateKey);
 
-  const { signature, verifySinature } = dsaSignature(voteMessage);
+  if (!privateKey) {
+    console.log('problem with private key');
+    return;
+  }
 
-  const { q, g, h, key } = generateElGamalKeys();
+  const cecPublicKeys = keys?.cec_key?.public_key
+  const key = new NodeRSA(cecPublicKeys, 'public');
+  key.setOptions({ encryptionScheme: 'pkcs1' });
 
-  const { enMsg, p } = encrypt(voteMessage, q, h, g);
+  let encrypted1 = key.encrypt(voteMessage1, 'base64', 'utf-8');
+  let encrypted2 = key.encrypt(voteMessage2, 'base64', 'utf-8');
 
-  const encripted = enMsg.map((el) => el.toString());
+  const dsaKey = dsa.genKeyPair();
 
-  const voteSent = await sendVote({
-    hashedMessage: encripted,
-    p: p.toString(),
-    q: q.toString(),
-    key: key.toString(),
-    signature,
-    verifySinature,
-  });
-  if (voteSent) {
-    console.log('your vote was successfully sent');
+  let signature1 = dsaKey.sign(encrypted1);
+  let signature2 = dsaKey.sign(encrypted2);
+
+  let publicDSAKey = dsaKey.getPublic('hex');
+
+  const votesSent =  await sendVotes(
+    {
+      voterId: voter.id,
+      msg: encrypted1,
+      signature: signature1,
+      publicKey: publicDSAKey,
+    },
+    {
+      voterId: voter.id,
+      msg: encrypted2,
+      signature: signature2,
+      publicKey: publicDSAKey,
+    }
+  );
+
+  if(votesSent){
+    console.log('Votes sent successfully, voter id:', voter.id)
     return;
   }
 
   console.log('Some error occured');
 };
 
-const generateAndEncryptBallot = async (voter, candidateId) => {
-  voter.ballots = [];
-  let voteData = {
-    voter_id: voter.id,
-    vote_for: candidateId,
-  };
-  let voteMsg = JSON.stringify(voteData);
-  let randomLine = generateRandomLine(10);
-  voteMsg += randomLine;
-  voter.ballots.push(voteMsg);
-  randomLines.push(randomLine);
-
-  for (let i = voters.length - 1; i >= 0; i--) {
-    let voterPbKey = keys['voter_keys'][voters[i].id].public_key;
-    const key = new NodeRSA(voterPbKey, 'public');
-    key.setOptions({ encryptionScheme: 'pkcs1' });
-    voteMsg = key.encrypt(voteMsg, 'base64', 'utf-8');
-    voter.ballots.push(voteMsg);
-    // console.log(`Encripted with voter ${i+1} public key\n`, voteMsg, '\n\n')
-  }
-
-  for (let i = voters.length - 1; i >= 0; i--) {
-    let voterPbKey = keys['voter_keys'][voters[i].id].public_key;
-    const key = new NodeRSA(voterPbKey, 'public');
-    key.setOptions({ encryptionScheme: 'pkcs1' });
-
-    let randomLine = generateRandomLine(10);
-    voteMsg += randomLine;
-    randomLines.push(randomLine);
-    voteMsg = key.encrypt(voteMsg, 'base64', 'utf-8');
-    voter.ballots.push(voteMsg);
-  }
-  console.log('Generated and encrypted ballot for voter:', voter.id);
-  return voteMsg;
-};
-
-const decryptAndDeleteLines = async (voter) => {
-  let voterPrKey = keys['voter_keys'][voter.id].private_key;
-  const key = new NodeRSA(voterPrKey, 'private');
-  key.setOptions({ encryptionScheme: 'pkcs1' });
-
-  ballots.forEach((ballot, index) => {
-    // console.log(ballot, '\n\n')
-    let decrypted = key.decrypt(ballot, 'utf8');
-    if (!decrypted) {
-      console.log(`Voter ${voter.id} could not decrypt ballot ${index + 1}`);
-      process.exit(1);
-    }
-    console.log(`Voter ${voter.id} decrypted ballot ${index + 1}`);
-    randomLines.forEach((line, lineIndex) => {
-      if (decrypted.includes(line)) {
-        decrypted = decrypted.replace(line, '');
-        console.log(
-          `Voter ${voter.id} deleted random line in ballot ${index + 1}`
-        );
-      }
-    });
-    ballots[index] = decrypted;
-  });
-
-  let ballotExists = false;
-
-  for (let el of voter.ballots) {
-    if (ballots.includes(el)) {
-      ballotExists = true;
-    }
-  }
-
-  if (!ballotExists) {
-    console.log("Voter didn't find his ballot.");
-    process.exit(1);
-  } else {
-    console.log(`Voter ${voter.id} checked that his ballot is still there`);
-  }
-
-  ballots = shuffle(ballots);
-  console.log(`Voter ${voter.id} shuffled ballots`);
-  console.log('\n\n');
-};
-
-const decryptAndSign = async (voterIndex) => {
-  let ballotsMsg;
-  let voterPrKey = keys['voter_keys'][voters[voterIndex].id].private_key;
-  const key = new NodeRSA(voterPrKey, 'private');
-  key.setOptions({ encryptionScheme: 'pkcs1' });
-
-  if (voterIndex > 0) {
-    // check signature
-    ballotsMsg = JSON.stringify(ballots);
-    let { signature, p, g, y } = signatures[voters[voterIndex - 1].id];
-    const verifySignature = elGamal.verify(p, g, y, ballotsMsg, signature);
-    if (!verifySignature) {
-      console.log(
-        `Voter ${voters[voterIndex].id} could not verify signature of voter ${
-          voters[voterIndex - 1].id
-        }`
-      );
-      process.exit(1);
-    }
-    console.log(
-      `Voter ${voters[voterIndex].id} succesfully verified signature of voter ${
-        voters[voterIndex - 1].id
-      }`
-    );
-  }
-
-  ballots.forEach((ballot, index) => {
-    // console.log(ballot, '\n\n')
-    let decrypted = key.decrypt(ballot, 'utf8');
-    if (!decrypted) {
-      console.log(
-        `Voter ${voters[voterIndex].id} could not decrypt ballot ${index + 1}`
-      );
-      process.exit(1);
-    }
-    console.log(`Voter ${voters[voterIndex].id} decrypted ballot ${index + 1}`);
-    ballots[index] = decrypted;
-  });
-
-  let ballotExists = false;
-
-  for (let el of voters[voterIndex].ballots) {
-    if (ballots.includes(el)) {
-      ballotExists = true;
-    }
-  }
-
-  if (!ballotExists) {
-    console.log("Voter didn't find his ballot.");
-    process.exit(1);
-  }
-  console.log(
-    `Voter ${voters[voterIndex].id} checked that his ballot is still there`
-  );
-
-  ballots = shuffle(ballots);
-  console.log(`Voter ${voters[voterIndex].id} shuffled ballots`);
-
-  let { p, g, x, y } = elGamal.generateKeys();
-  ballotsMsg = JSON.stringify(ballots);
-
-  const signature = elGamal.sign(p, g, x, ballotsMsg);
-
-  signatures[voters[voterIndex].id] = {
-    signature,
-    p,
-    g,
-    y,
-  };
-
-  console.log(`Voter ${voters[voterIndex].id} signed ballots\n\n`);
-};
-
-const checkLastSignature = async () => {
-  // check signature of last voter
-  ballotsMsg = JSON.stringify(ballots);
-  let lastVoter = voters[voters.length - 1];
-  let { signature, p, g, y } = signatures[lastVoter.id];
-  const verifySignature = elGamal.verify(p, g, y, ballotsMsg, signature);
-  if (!verifySignature) {
-    console.log(
-      `Voters could not verify signature of last voter ${lastVoter.id}`
-    );
-    process.exit(1);
-  }
-  console.log(
-    `Voters succesfully verified signature of voter ${lastVoter.id}\n`
-  );
-};
-
-const checkVoterBallots = async () => {
-  //all voters check if their ballot is there
-  for (let voter of voters) {
-    let ballotExists = false;
-
-    for (let el of voter.ballots) {
-      if (ballots.includes(el)) {
-        ballotExists = true;
-      }
-    }
-    if (!ballotExists) {
-      console.log("Voter didn't find his ballot.");
-      process.exit(1);
-    }
-    console.log(`Voter ${voter.id} checked that his ballot is still there`);
-  }
-  console.log('\n');
-};
-
-const calculateResults = async () => {
-  let votersDone = new Set();
-
-  candidates.forEach((el) => {
-    results.candidates.push({ id: el.id, name: el.name, votes: 0 });
-  });
-
-  ballots.forEach((ballot, index) => {
-    randomLines.forEach((line, lineIndex) => {
-      if (ballot.includes(line)) {
-        ballot = ballot.replace(line, '');
-        console.log(`Random line was deleted in ballot ${index + 1}`);
-      }
-    });
-
-    ballotObj = JSON.parse(ballot);
-    // console.log(ballotObj)
-
-    const candidateIndex = candidates.findIndex(
-      (el) => el.id === ballotObj.vote_for
-    );
-    if (candidateIndex < 0) {
-      console.log(
-        'There is no candidate with that id, that was provided in ballot:',
-        ballotObj,
-        '\n'
-      );
-      return;
-    }
-
-    const voterIndex = voters.findIndex((el) => el.id === ballotObj.voter_id);
-    if (voterIndex < 0) {
-      console.log('There is no voter with such id in ballot:' , ballotObj);
-      return;
-    }
-
-    if(!voters[voterIndex].can_vote){
-      console.log('This voter does not have the right to vote' , ballotObj)
-      return;
-    }
-
-    if(votersDone.has(ballotObj.voter_id)){
-      console.log(`Voter with id ${ballotObj.voter_id} has already voted`)
-      return;
-    }
-
-    votersDone.add(ballotObj.voter_id);
-    results.candidates[candidateIndex].votes += 1;
-    results.votes.push({voter_id: ballotObj.voter_id, vote_for: candidates[candidateIndex].name})
-    console.log(`Voter with id ${ballotObj.voter_id} has successfully voted for ${candidates[candidateIndex].name}`)
-  });
-  console.log('\n\n')
-};
-
-const viewResults = () => {
-  if (!results.candidates || !results.votes) {
-    console.log("There're no available vote results yet");
+const sendVotes = async (ec1Vote, ec2Vote) => {
+  if (typeof ec1Vote !== 'object' || typeof ec2Vote !== 'object') {
+    console.log('Wrong agruments in sendVotes function');
     return;
   }
-  let resultsStr = 'Results:\n';
-  for (let candidate of results.candidates) {
-    resultsStr += `Candidate ${candidate.name} : ${candidate.votes} votes\n`;
+
+  ec1Ballots.push(ec1Vote);
+  ec2Ballots.push(ec2Vote);
+
+  try {
+    await fs.writeFileSync(
+      './data/ec1_ballots.json',
+      JSON.stringify(ec1Ballots, null, 2)
+    );
+    await fs.writeFileSync(
+      './data/ec2_ballots.json',
+      JSON.stringify(ec2Ballots, null, 2)
+    );
+    return true;
+  } catch (err) {
+    console.error(err);
+    return false;
   }
-  resultsStr += '\n';
-  for (let vote of results.votes) {
-    resultsStr += `Voter ${vote.voter_id} voted for ${vote.vote_for}\n`;
-  }
-  console.log(resultsStr);
 };
 
 const main = async () => {
@@ -361,32 +160,10 @@ const main = async () => {
     keys = await generateRSAKeys();
   }
 
-  console.log('Voters number:', voters.length);
-
-  ballots[0] = await generateAndEncryptBallot(voters[0], 1);
-  ballots[1] = await generateAndEncryptBallot(voters[1], 1);
-  ballots[2] = await generateAndEncryptBallot(voters[2], 2);
-  ballots[3] = await generateAndEncryptBallot(voters[3], 1);
-  console.log('\n\n');
-
-  await decryptAndDeleteLines(voters[0]);
-  await decryptAndDeleteLines(voters[1]);
-  await decryptAndDeleteLines(voters[2]);
-  await decryptAndDeleteLines(voters[3]);
-
-  await decryptAndSign(0);
-  await decryptAndSign(1);
-  await decryptAndSign(2);
-  await decryptAndSign(3);
-  // console.log(ballots);
-
-  await checkLastSignature();
-
-  await checkVoterBallots();
-
-  await calculateResults();
-
-  viewResults();
+  await makeVote(voters[0], 2395283);
+  await makeVote(voters[1], 9092835)
+  await makeVote(voters[2], 9092835)
+  await makeVote(voters[3], 654224)
 };
 
 (async () => {
